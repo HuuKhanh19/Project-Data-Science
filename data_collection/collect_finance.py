@@ -27,20 +27,33 @@ def collect_finance():
     Mỗi báo cáo lấy theo quý, 12 quý gần nhất (3 năm).
     """
     logger.info(f"Thu thập báo cáo tài chính {SYMBOL}...")
+    try:
+        # Lấy báo cáo tài chính TCB (income, balance sheet, cash flow) và lưu vào raw_finance
+        stock = Vnstock().stock(symbol=SYMBOL, source=DATA_SOURCE)
+        logger.info("Bắt đầu lấy income statement...")
+        income_df = stock.finance.income_statement(period='quarter', count=12)
+        logger.info(f"Income statement: {income_df.shape if hasattr(income_df, 'shape') else type(income_df)}")
+        logger.info("Bắt đầu lấy balance sheet...")
+        balance_df = stock.finance.balance_sheet(period='quarter', count=12)
+        logger.info(f"Balance sheet: {balance_df.shape if hasattr(balance_df, 'shape') else type(balance_df)}")
+        logger.info("Bắt đầu lấy cash flow statement...")
+        cashflow_df = stock.finance.cash_flow(period='quarter', count=12)
+        logger.info(f"Cash flow statement: {cashflow_df.shape if hasattr(cashflow_df, 'shape') else type(cashflow_df)}")
 
-    # TODO: Thành viên B implement
-    # Gợi ý:
-    # 1. Dùng Vnstock().stock(symbol=SYMBOL, source=DATA_SOURCE)
-    # 2. Gọi stock.finance.income_statement(period='quarter')
-    # 3. Gọi stock.finance.balance_sheet(period='quarter')
-    # 4. Gọi stock.finance.cash_flow(period='quarter')
-    # 5. Chuyển đổi format phù hợp (xem schema raw_finance)
-    # 6. Lưu bằng write_table(df, "raw_finance")
-    #
-    # Lưu ý: vnstock có thể trả về format khác nhau tuỳ version
-    # Cần kiểm tra output thực tế và adjust cho phù hợp
+        # Gộp các báo cáo vào một DataFrame
+        import pandas as pd
+        df = pd.concat([income_df, balance_df, cashflow_df], ignore_index=True)
+        logger.info(f"Tổng số dòng sau khi gộp: {df.shape[0]}")
 
-    raise NotImplementedError("Thành viên B cần implement hàm này")
+        # Chuyển đổi format nếu cần (tuỳ schema raw_finance)
+        # Ví dụ: df = df.rename(columns={...})
+
+        # Lưu vào bảng raw_finance
+        logger.info("Bắt đầu ghi vào bảng raw_finance...")
+        write_table(df, "raw_finance")
+        logger.success("Đã ghi dữ liệu vào bảng raw_finance thành công!")
+    except Exception as e:
+        logger.error(f"Lỗi khi thu thập hoặc ghi dữ liệu: {e}")
 
 
 if __name__ == "__main__":
