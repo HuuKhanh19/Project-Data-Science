@@ -7,7 +7,12 @@ Ví dụ:
     from config.settings import DB_PATH, SYMBOL, DEVICE
 """
 from pathlib import Path
-import torch
+
+# Optional: torch for model training (not needed for data pipeline)
+try:
+    import torch
+except ImportError:
+    torch = None
 
 # ============================
 # Paths
@@ -94,4 +99,7 @@ SENTIMENT_MODEL = "wonrax/phobert-base-vietnamese-sentiment"
 # ============================
 # Device (GPU/CPU)
 # ============================
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+if torch is not None:
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+else:
+    DEVICE = 'cpu'
