@@ -367,9 +367,37 @@ class BasePredictor(ABC):
 
         for attr, key in [("feature_scaler", "feature_scaler"), ("target_scaler", "target_scaler")]:
             scaler = MinMaxScaler()
-            for scaler_key, value in ckpt[key].items():
-                setattr(scaler, scaler_key, np.array(value))
-            scaler.n_features_in_ = len(ckpt[key]["data_min_"])
+            # ckpt stores scaler arrays like 'data_min_', 'scale_', 'data_range_', 'data_max_'
+            # We need to reconstruct sklearn's expected attributes: min_, scale_, data_min_, data_max_, data_range_
+            data_min = np.array(ckpt[key].get("data_min_")) if "data_min_" in ckpt[key] else None
+            data_max = np.array(ckpt[key].get("data_max_")) if "data_max_" in ckpt[key] else None
+            data_range = np.array(ckpt[key].get("data_range_")) if "data_range_" in ckpt[key] else None
+            scale_arr = np.array(ckpt[key].get("scale_")) if "scale_" in ckpt[key] else None
+
+            if data_min is not None:
+                scaler.data_min_ = data_min
+            if data_max is not None:
+                scaler.data_max_ = data_max
+            if data_range is not None:
+                scaler.data_range_ = data_range
+            if scale_arr is not None:
+                scaler.scale_ = scale_arr
+
+            # Reconstruct 'min_' (sklearn uses min_ = feature_range_min - data_min_ * scale_)
+            # Default feature_range is (0,1) so feature_range_min = 0
+            if data_min is not None and scale_arr is not None:
+                try:
+                    scaler.min_ = -data_min * scale_arr
+                except Exception:
+                    scaler.min_ = (-data_min * scale_arr).tolist()
+
+            # n_features_in_
+            if data_min is not None:
+                scaler.n_features_in_ = len(data_min)
+            elif scale_arr is not None:
+                scaler.n_features_in_ = len(scale_arr)
+            else:
+                scaler.n_features_in_ = 0
             setattr(self, attr, scaler)
 
         logger.info(f"Model loaded: {path}")

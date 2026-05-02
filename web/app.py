@@ -188,8 +188,9 @@ with st.sidebar:
     # Database status
     st.subheader("📦 Database Status")
     for table_name in ['raw_prices', 'raw_finance', 'raw_news',
-                       'clean_prices', 'clean_finance', 'clean_news',
-                       'merged_features', 'predictions', 'model_metrics']:
+                       'clean_prices', 'features_finance', 'clean_news',
+                       'daily_news_embeddings', 'merged_features',
+                       'predictions', 'model_metrics']:
         if table_exists(table_name):
             try:
                 count = len(read_table(table_name))

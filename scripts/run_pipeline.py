@@ -49,13 +49,15 @@ def main() -> None:
         logger.warning("collect_finance không trả về DataFrame — kiểm tra vnstock / mạng.")
     process_finance()
 
-    if not args.skip_news and table_exists("raw_news") and table_row_count("raw_news") > 0:
-        logger.info("Bước 4: Tiền xử lý tin tức + sentiment")
+    if not args.skip_news:
+        logger.info("Bước 4: Thu thập và tiền xử lý tin tức")
+        from data_collection.collect_news import collect_news
         from preprocessing.process_news import process_news
 
+        collect_news()
         process_news()
     else:
-        logger.info("Bước 4: Bỏ qua tin (không có raw_news hoặc --skip-news)")
+        logger.info("Bước 4: Bỏ qua tin (--skip-news)")
 
     logger.info("Bước 5: Merge đặc trưng → merged_features")
     from preprocessing.merge_features import merge_features

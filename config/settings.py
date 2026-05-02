@@ -42,8 +42,11 @@ TABLE_RAW_NEWS = "raw_news"
 
 # Clean tables (đã tiền xử lý)
 TABLE_CLEAN_PRICES = "clean_prices"
-TABLE_CLEAN_FINANCE = "clean_finance"
+TABLE_FEATURES_FINANCE = "features_finance"
+# Deprecated alias kept for backward compatibility in modules/docs not yet updated.
+TABLE_CLEAN_FINANCE = TABLE_FEATURES_FINANCE
 TABLE_CLEAN_NEWS = "clean_news"
+TABLE_DAILY_NEWS_EMBEDDINGS = "daily_news_embeddings"
 
 # Output tables
 TABLE_MERGED_FEATURES = "merged_features"
@@ -61,6 +64,7 @@ DROPOUT = 0.2
 LEARNING_RATE = 0.001
 EPOCHS = 100
 BATCH_SIZE = 32
+DEFAULT_MODEL_NAME = "lstm"
 
 # Train/Val/Test split ratios (theo thời gian, KHÔNG random)
 TRAIN_RATIO = 0.70
@@ -92,9 +96,22 @@ FINANCE_FEATURES = [
     # không có trong features_finance → đã xóa để tránh confusion
 ]
 
-SENTIMENT_FEATURES = ['daily_sentiment', 'news_count']
+SENTIMENT_FEATURES = [
+    'daily_sentiment',
+    'news_count',
+    'embedding_score_mean',
+    'embedding_score_std',
+]
 
 ALL_FEATURES = PRICE_FEATURES + TECHNICAL_FEATURES + FINANCE_FEATURES + SENTIMENT_FEATURES
+
+# Quarter-specific reporting lag rules for when financial data becomes available.
+FINANCE_REPORT_LAG_DAYS = {
+    'Q1': 30,
+    'Q2': 45,
+    'Q3': 30,
+    'Q4': 90,
+}
 
 # ============================
 # NLP / Sentiment

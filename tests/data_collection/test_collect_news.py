@@ -1,56 +1,59 @@
 import sys
 import types
 import unittest
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
+
+from tests.support import install_loguru_stub, install_requests_stub
 
 
-if "requests" not in sys.modules:
-    sys.modules["requests"] = types.ModuleType("requests")
+def _load_collect_news_module():
+    repo_root = Path(__file__).resolve().parents[2]
+    module_path = repo_root / "data_collection" / "collect_news.py"
+    module_name = "_collect_news_under_test"
 
-if "loguru" not in sys.modules:
-    loguru_module = types.ModuleType("loguru")
-
-    class _Logger:
-        def add(self, *args, **kwargs):
-            return None
-
-        def info(self, *args, **kwargs):
-            return None
-
-        def warning(self, *args, **kwargs):
-            return None
-
-        def error(self, *args, **kwargs):
-            return None
-
-    loguru_module.logger = _Logger()
-    sys.modules["loguru"] = loguru_module
-
-if "database" not in sys.modules:
-    sys.modules["database"] = types.ModuleType("database")
-
-if "database.connection" not in sys.modules:
+    database_package = types.ModuleType("database")
     database_connection_module = types.ModuleType("database.connection")
     database_connection_module.get_connection = lambda *args, **kwargs: None
     database_connection_module.write_table = lambda *args, **kwargs: None
-    sys.modules["database.connection"] = database_connection_module
 
-if "config" not in sys.modules:
-    sys.modules["config"] = types.ModuleType("config")
-
-if "config.settings" not in sys.modules:
+    config_package = types.ModuleType("config")
     settings_module = types.ModuleType("config.settings")
     settings_module.SYMBOL = "TCB"
     settings_module.DATA_START_DATE = "2022-01-01"
     settings_module.DATA_END_DATE = "2025-03-12"
-    sys.modules["config.settings"] = settings_module
 
-import data_collection.collect_news as collect_news_module
+    temporary_modules = {
+        "database": database_package,
+        "database.connection": database_connection_module,
+        "config": config_package,
+        "config.settings": settings_module,
+    }
 
-from data_collection.collect_news import (
-    dedupe_news_records,
-    is_within_date_range,
-    normalize_date_text,
-)
+    previous_modules = {name: sys.modules.get(name) for name in temporary_modules}
+    install_requests_stub()
+    install_loguru_stub()
+
+    try:
+        sys.modules.update(temporary_modules)
+        spec = spec_from_file_location(module_name, module_path)
+        module = module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        for name, previous in previous_modules.items():
+            if previous is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
+
+
+collect_news_module = _load_collect_news_module()
+
+dedupe_news_records = collect_news_module.dedupe_news_records
+is_within_date_range = collect_news_module.is_within_date_range
+normalize_date_text = collect_news_module.normalize_date_text
 
 
 class CollectNewsHelperTests(unittest.TestCase):

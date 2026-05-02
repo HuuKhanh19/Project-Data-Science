@@ -19,7 +19,7 @@ try:
 except Exception:
     np = None
 import torch
-from loguru import logger
+from utils.logger import logger
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 # If the script is run directly, the package root may not be on sys.path.
 # Try importing normally; if it fails, add the repository root to sys.path

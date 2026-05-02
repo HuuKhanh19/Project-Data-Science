@@ -14,7 +14,9 @@ import numpy as np
 from datetime import datetime
 from utils.logger import logger
 from database.connection import read_table, write_table, get_connection, table_exists
-from config.settings import ALL_FEATURES
+from config.settings import ALL_FEATURES, DEFAULT_MODEL_NAME
+import json
+from pathlib import Path
 
 from models.lstm_model import LSTMPredictor
 from models.gru_model import GRUPredictor
@@ -32,10 +34,38 @@ MODEL_MAP = {
 def get_best_model_name() -> str:
     """Tìm best model từ model_metrics table."""
     metrics = read_table("model_metrics")
-    best = metrics[metrics['is_best'] == 1]
-    if best.empty:
-        best = metrics.sort_values('mape').head(1)
-    return best.iloc[0]['model_name']
+    # If DB table has entries, prefer rows flagged is_best, otherwise lowest mape
+    if not metrics.empty:
+        best = metrics[metrics['is_best'] == 1]
+        if best.empty:
+            best = metrics.sort_values('mape').head(1)
+        return best.iloc[0]['model_name']
+
+    # Fallback: look for saved metrics JSON under models/saved
+    logger.warning("model_metrics table empty — attempting fallback to saved metrics files")
+    saved_dir = Path(__file__).resolve().parents[0] / "saved"
+    if saved_dir.exists():
+        candidates = []
+        for path in saved_dir.glob("metrics_*.json"):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                mape = data.get("mape")
+                name = data.get("model_name") or path.stem.split("_", 1)[-1]
+                if mape is not None:
+                    candidates.append((float(mape), name, path))
+            except Exception:
+                continue
+
+        if candidates:
+            candidates.sort(key=lambda x: x[0])
+            chosen = candidates[0][1]
+            logger.warning(f"Using saved metrics fallback: {chosen} (from {candidates[0][2].name})")
+            return chosen
+
+    # Final fallback to DEFAULT_MODEL_NAME
+    logger.warning(f"No saved metrics found — falling back to DEFAULT_MODEL_NAME={DEFAULT_MODEL_NAME}")
+    return DEFAULT_MODEL_NAME
 
 
 def predict_all():
@@ -46,8 +76,11 @@ def predict_all():
     best_name = get_best_model_name()
     logger.info(f"Sử dụng best model: {best_name}")
 
-    # Load model
-    model_class = MODEL_MAP[best_name]
+    # Load model class
+    model_class = MODEL_MAP.get(best_name)
+    if model_class is None:
+        logger.error(f"No model implementation for '{best_name}' — aborting prediction.")
+        return
     model = model_class()
     model.load(name=best_name)
 
@@ -79,6 +112,33 @@ def predict_all():
         })
 
     pred_df = pd.DataFrame(predictions)
+    # Calibrate / fallback: if simple prev_close baseline outperforms model
+    # on the known subset, prefer baseline to avoid large deterioration.
+    if not pred_df.empty:
+        try:
+            prices = read_table('raw_prices')[["date", "close"]].sort_values("date").reset_index(drop=True)
+            prices["prev_close"] = prices["close"].shift(1)
+
+            merged = pred_df.merge(prices[["date", "prev_close"]], on="date", how="left")
+            known = merged.dropna(subset=["predicted_price", "actual_price", "prev_close"])
+
+            if not known.empty:
+                model_mae = np.mean(np.abs(known['predicted_price'] - known['actual_price']))
+                baseline_mae = np.mean(np.abs(known['prev_close'] - known['actual_price']))
+                if baseline_mae < model_mae:
+                    logger.warning(
+                        "Prev-close baseline outperforms model on known history — using baseline for final predictions"
+                    )
+                    # Replace predicted_price with prev_close where available
+                    pred_df = pred_df.merge(prices[["date", "prev_close"]], on="date", how="left")
+                    pred_df['predicted_price'] = pred_df.apply(
+                        lambda r: round(r['prev_close'], 0) if not pd.isna(r.get('prev_close')) else r['predicted_price'],
+                        axis=1,
+                    )
+                    pred_df = pred_df.drop(columns=[c for c in ['prev_close'] if c in pred_df.columns])
+        except Exception:
+            logger.exception("Error computing baseline fallback; proceeding with model predictions")
+
     write_table(pred_df, "predictions")
 
     logger.info(f"✅ Đã lưu {len(pred_df)} predictions vào database")

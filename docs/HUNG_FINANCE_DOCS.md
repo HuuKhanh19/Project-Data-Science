@@ -1,153 +1,91 @@
 # Bao cao ky thuat: Pipeline du lieu bao cao tai chinh
 
-Tai lieu nay mo ta co che hoat dong, cau truc du lieu va cac thong so xu ly cho pipeline bao cao tai chinh trong nhanh Hung.
+Tai lieu nay mo ta pipeline finance sau khi da duoc chuan hoa lai de tranh look-ahead bias va thong nhat schema cho toan repo.
 
-## 1) Muc tieu nghiep vu
+## 1) Muc tieu
 
-Khoi xu ly bao cao tai chinh duoc thiet ke de:
+- Thu thap ratio tai chinh theo quy cho ma `TCB`.
+- Luu raw input theo mot schema wide duy nhat.
+- Suy ra `period_end_date` va `effective_date` de merge theo thoi diem co hieu luc.
+- Tao `features_finance` dung truc tiep cho `merged_features` va model training.
 
-- Thu thap du lieu BCTC theo quy cho ma co phieu TCB.
-- Chuan hoa du lieu ve dang tinh toan theo quy.
-- Tao cac bien tai chinh phuc vu mo hinh hoa du bao.
-- Luu bo du lieu da xu ly vao clean_finance cho cac buoc feature merge va model training.
+## 2) Thanh phan
 
-## 2) Thanh phan he thong
+- `data_collection/collect_finance.py`
+- `preprocessing/process_finance.py`
+- `preprocessing/finance_utils.py`
 
-Pipeline gom 2 module van hanh:
+Luong xu ly:
 
-- data_collection/collect_finance.py
-- preprocessing/process_finance.py
+1. `collect_finance` lay ratio theo quy va ghi vao `raw_finance`.
+2. `process_finance` doc `raw_finance`, tinh feature, giu dung `NaN` dau ky va ghi vao `features_finance`.
+3. `merge_features` join finance vao gia theo nguyen tac `effective_date <= trading_date`.
 
-Quan he giua 2 module:
+## 3) Schema raw_finance
 
-1. collect_finance lay va ghi du lieu goc vao raw_finance.
-2. process_finance doc raw_finance, bien doi, tinh toan va ghi clean_finance.
+`raw_finance` la wide-format. Moi dong dai dien cho mot quy va co cac cot timing bat buoc:
 
-## 3) Nguon du lieu va tham so thu thap
+- `symbol`
+- `date` theo ma quy, vi du `2024-Q1`
+- `period_end_date`
+- `effective_date`
+- cac cot ratio nhu `roe`, `roa`, `debt_to_equity`, `pe_ratio`, `pb_ratio`, `eps_vnd`, `bvps_vnd`
 
-Du lieu dau vao duoc lay qua thu vien vnstock, voi cau hinh tu he thong:
+Khong con su dung long-format `ticker / quarter / metric_name / value`.
 
-- ma co phieu: TCB
-- nguon du lieu: VCI
-- tan suat bao cao: quy
-- cua so lay lieu: 12 quy
+## 4) Quy tac effective_date
 
-Ba nhom bao cao duoc truy van:
+`effective_date` duoc suy ra tu config `FINANCE_REPORT_LAG_DAYS`:
 
-- Income Statement
-- Balance Sheet
-- Cash Flow Statement
+- `Q1 = 30 ngay`
+- `Q2 = 45 ngay`
+- `Q3 = 30 ngay`
+- `Q4 = 90 ngay`
 
-Sau khi lay xong, du lieu duoc noi theo chieu dong bang pd.concat va ghi vao raw_finance.
+`date` van la ma ky bao cao. Thoi diem du lieu duoc phep xuat hien trong feature pipeline la `effective_date`.
 
-## 4) Mo hinh du lieu
+## 5) Xu ly features_finance
 
-### 4.1 Dinh dang du lieu goc
+`process_finance.py` thuc hien:
 
-Du lieu o raw_finance duoc ky vong theo long format, toi thieu gom:
+- chuan hoa quarter code
+- bo sung `period_end_date`, `effective_date` neu raw data chua co
+- sap xep theo thoi gian
+- chi `forward fill`, khong `backfill`
+- tinh `roe_yoy`, `roa_yoy`, `roe_lag4`, `roa_lag4`
+- giu `NaN` cho giai doan chua du lich su thay vi suy dien nguoc
 
-- ticker
-- quarter
-- metric_name
-- value
+Dau ra duoc ghi vao bang `features_finance`.
 
-Long format giup de them metric moi, nhung chua thuan tien cho tinh ratio truc tiep.
+## 6) Merge voi gia co phieu
 
-### 4.2 Dinh dang sau bien doi
+`preprocessing/merge_features.py` khong con fallback sang raw finance hoac ten bang finance cu.
 
-Buoc preprocessing chuyen raw_finance sang wide format voi nguyen tac:
+Finance duoc join bang `merge_asof` theo:
 
-- index: ticker, quarter
-- columns: metric_name
-- values: value
+- khoa sap xep: `effective_date`
+- quy tac: lay ban ghi finance gan nhat ma `effective_date <= trade_date`
 
-Sau pivot, moi dong bieu dien mot ma trong mot quy, co cac cot metric rieng de tinh chi so.
+Dieu nay loai bo look-ahead bias khi model hoc tren du lieu gia hang ngay.
 
-## 5) Quy trinh xu ly chi tiet
+## 7) Kiem soat chat luong
 
-### Buoc A - Tai du lieu
+Nhung diem can kiem tra:
 
-- Doc bang raw_finance.
-- Ghi log so dong dau vao.
+- `raw_finance` chi co mot schema wide duy nhat
+- `effective_date` luon lon hon hoac bang `period_end_date`
+- `features_finance` khong co backfill cho cac cot YoY / lag
+- `merged_features` khong duoc nhin thay quy moi truoc `effective_date`
 
-### Buoc B - Chuan hoa theo quy
+## 8) Lenh van hanh
 
-- Pivot long -> wide de tao mat tran chi so theo quy.
-- Sap xep theo ticker, quarter de dam bao thu tu thoi gian.
+1. `python -m database.schema`
+2. `python -m data_collection.collect_finance`
+3. `python -m preprocessing.process_finance`
+4. `python -m preprocessing.merge_features`
 
-### Buoc C - Tinh bien tai chinh
+## 9) Dau ra mong doi
 
-Nhom chi so cot loi:
-
-- ROE = Net Income / Equity
-- ROA = Net Income / Total Assets
-
-Nhom chi so dac thu ngan hang:
-
-- NIM = Net Interest Income / Total Assets
-- NPL = Bad Debt / Total Loans
-
-Neu thieu cot thanh phan trong cong thuc, gia tri duoc gan NA thay vi ep tinh.
-
-### Buoc D - Tinh toc do tang truong theo nam
-
-Voi moi cot so, he thong tao them cot tang truong nam:
-
-- ten cot moi: <metric>_YoY_Growth
-- cong thuc: pct_change(periods=4)
-
-Ly do chon periods=4: du lieu theo quy, 4 quy tuong ung 1 nam.
-
-### Buoc E - Xu ly gia tri thieu
-
-- Ap dung forward fill theo tung ticker.
-- Gioi han bu filling: toi da 1 quy lien tiep.
-
-Co che nay giam mat du lieu ngan han nhung han che lan truyen sai so khi khoang trong qua dai.
-
-### Buoc F - Luu ket qua
-
-- Ghi bang clean_finance trong SQLite.
-- Xuat tep clean_finance.csv.
-- Neu CSV dang bi khoa, ghi sang clean_finance_temp.csv.
-
-## 6) Danh muc bien dau ra
-
-Nhom bien thuong xuyen xuat hien o clean_finance:
-
-- Khoa chinh nghiep vu: ticker, quarter
-- Metric goc sau pivot: tuy vao du lieu tra ve tu vnstock
-- Chi so tinh toan truc tiep: ROE, ROA, NIM, NPL
-- Chi so tang truong: cac cot hau to _YoY_Growth cho bien so
-
-## 7) Kiem soat chat luong du lieu
-
-Nhung diem can kiem tra khi van hanh:
-
-- Ton tai du 4 cot long-format truoc pivot.
-- Quy tac dat ten quarter thong nhat de tranh sap xep sai trinh tu.
-- So luong cot metric sau pivot phai phu hop ky vong theo tung ky lay lieu.
-- Gia tri chia so khong bang 0 khi tinh ratio (neu bang 0 can xu ly null an toan).
-- Ti le NA truoc va sau fill de danh gia do day du cua bo du lieu.
-
-## 8) Gioi han hien tai cua pipeline
-
-Tai thoi diem lap bao cao, bo ratio hien hanh tap trung vao nhom can ban va ngan hang. Cac chi so nghiep vu thuong gap khac (vi du PE, PB, Debt to Equity, Cost to Income) can duoc bo sung cong thuc va mapping cot dau vao neu muon su dung trong model theo danh muc day du.
-
-## 9) Huong dan tai hien
-
-Trinh tu chay:
-
-1. python -m database.schema
-2. python -m data_collection.collect_finance
-3. python -m preprocessing.process_finance
-
-Kiem tra dau ra:
-
-- raw_finance co du lieu goc theo quy
-- clean_finance co cot ratio va cot YoY growth
-- Co tep clean_finance.csv hoac clean_finance_temp.csv
-
-## 10) Tom tat ky thuat
-
-Pipeline bao cao tai chinh duoc xay dung theo huong tách ro dau vao, bien doi va dau ra. Du lieu duoc lay theo quy tu nguon ben ngoai, chuan hoa thanh bang theo quy, tinh cac bien tai chinh then chot va bo sung bien tang truong nam. Dau ra clean_finance duoc thiet ke de dung truc tiep cho cac buoc tong hop dac trung va huan luyen mo hinh du bao.
+- `raw_finance`: ratio goc theo quy, wide-format
+- `features_finance`: finance features da xu ly, co `effective_date`
+- `merged_features`: da map finance vao moi ngay giao dich theo timing hop le

@@ -12,7 +12,7 @@ from urllib.parse import urlencode, urljoin
 import pandas as pd
 import requests
 from requests.exceptions import HTTPError
-from loguru import logger
+from utils.logger import logger
 try:
     from bs4 import BeautifulSoup
 except Exception:

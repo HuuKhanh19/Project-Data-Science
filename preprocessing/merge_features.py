@@ -1,168 +1,123 @@
 """
-Merge 3 bảng clean thành merged_features cho model.
-═════════════════════════════════════════════════════
-Chạy: python -m preprocessing.merge_features
-
-Input:  clean_prices, clean_finance, clean_news
-Output: merged_features table (sẵn sàng cho model)
+Merge cleaned price / finance / news features into merged_features for models.
 """
-import re
 import pandas as pd
-from loguru import logger
+from utils.logger import logger
+
+from config.settings import (
+    ALL_FEATURES,
+    TABLE_CLEAN_NEWS,
+    TABLE_CLEAN_PRICES,
+    TABLE_FEATURES_FINANCE,
+    TABLE_MERGED_FEATURES,
+)
 from database.connection import read_table, write_table
+
 
 logger.add("logs/merge_features.log", rotation="1 week")
 
 
-def merge_features():
-    """
-    Merge 3 bảng clean thành 1 bảng merged_features.
+def _load_clean_prices() -> pd.DataFrame:
+    prices = read_table(TABLE_CLEAN_PRICES)
+    if prices.empty:
+        raise ValueError("clean_prices rỗng — không thể merge")
 
-    Logic merge:
-    - clean_prices: trục chính (mỗi ngày giao dịch = 1 row)
-    - clean_finance: map theo quarter (mỗi ngày trong Q3 dùng số liệu Q3)
-    - clean_news: aggregate theo ngày (mean sentiment, count)
-    - target: giá close ngày hôm sau (shift -1)
-    """
+    prices = prices.copy()
+    prices["date"] = pd.to_datetime(prices["date"]).dt.strftime("%Y-%m-%d")
+    prices["trade_date"] = pd.to_datetime(prices["date"])
+    return prices.sort_values("trade_date").reset_index(drop=True)
+
+
+def _merge_finance_features(prices: pd.DataFrame) -> pd.DataFrame:
+    try:
+        finance = read_table(TABLE_FEATURES_FINANCE)
+    except Exception:
+        logger.warning("Không tìm thấy features_finance — tiếp tục không có finance features")
+        return prices.copy()
+
+    if finance.empty:
+        logger.warning("features_finance rỗng — tiếp tục không có finance features")
+        return prices.copy()
+
+    finance = finance.copy()
+    finance["effective_date"] = pd.to_datetime(finance["effective_date"])
+    finance["period_end_date"] = pd.to_datetime(finance["period_end_date"]).dt.strftime("%Y-%m-%d")
+    finance = finance.rename(columns={"date": "finance_quarter"})
+    finance = finance.sort_values(["effective_date", "finance_quarter"]).reset_index(drop=True)
+
+    finance_columns = [
+        column
+        for column in finance.columns
+        if column not in {"id", "symbol", "created_at"}
+    ]
+    finance = finance[finance_columns].copy()
+    finance["effective_date_dt"] = finance["effective_date"]
+
+    merged = pd.merge_asof(
+        prices.sort_values("trade_date"),
+        finance.sort_values("effective_date_dt"),
+        left_on="trade_date",
+        right_on="effective_date_dt",
+        direction="backward",
+    )
+
+    merged["effective_date"] = pd.to_datetime(merged["effective_date"]).dt.strftime("%Y-%m-%d")
+    merged = merged.drop(columns=["effective_date_dt"], errors="ignore")
+    return merged
+
+
+def _merge_news_features(merged: pd.DataFrame) -> pd.DataFrame:
+    try:
+        news = read_table(TABLE_CLEAN_NEWS)
+    except Exception:
+        logger.warning("Không tìm thấy clean_news — dùng giá trị news mặc định")
+        news = pd.DataFrame()
+
+    if news.empty:
+        merged["daily_sentiment"] = 0.0
+        merged["news_count"] = 0
+        merged["embedding_score_mean"] = 0.0
+        merged["embedding_score_std"] = 0.0
+        return merged
+
+    news = news.copy()
+    news["date"] = pd.to_datetime(news["date"]).dt.strftime("%Y-%m-%d")
+
+    daily_news = (
+        news.groupby("date", sort=False)
+        .agg(
+            daily_sentiment=("sentiment_score", "mean"),
+            news_count=("date", "size"),
+            embedding_score_mean=("embedding_score", "mean"),
+            embedding_score_std=("embedding_score", "std"),
+        )
+        .reset_index()
+    )
+
+    merged = merged.merge(daily_news, on="date", how="left")
+    merged["daily_sentiment"] = merged["daily_sentiment"].fillna(0.0)
+    merged["news_count"] = merged["news_count"].fillna(0).astype(int)
+    merged["embedding_score_mean"] = merged["embedding_score_mean"].fillna(0.0)
+    merged["embedding_score_std"] = merged["embedding_score_std"].fillna(0.0)
+    return merged
+
+
+def merge_features():
     logger.info("Merge features từ 3 nguồn...")
 
-    # 1. Read clean_prices
-    try:
-        prices = read_table("clean_prices")
-    except Exception as e:
-        logger.error(f"Không thể đọc clean_prices: {e}")
-        return None
+    prices = _load_clean_prices()
+    merged = _merge_finance_features(prices)
+    merged = _merge_news_features(merged)
 
-    if prices.empty:
-        logger.error("clean_prices rỗng — không thể merge")
-        return None
+    merged["target"] = merged["close"].shift(-1)
 
-    # Normalize date column
-    prices = prices.copy()
-    prices['date'] = pd.to_datetime(prices['date']).dt.strftime('%Y-%m-%d')
-    prices = prices.sort_values('date').reset_index(drop=True)
+    required_feature_columns = [column for column in ALL_FEATURES if column in merged.columns]
+    merged = merged.dropna(subset=required_feature_columns + ["target"]).reset_index(drop=True)
 
-    # 2. Read finance features (try multiple possible table names)
-    finance = None
-    for fname in ('features_finance', 'clean_finance', 'raw_finance'):
-        try:
-            df_fin = read_table(fname)
-            if not df_fin.empty:
-                finance = df_fin.copy()
-                finance_table = fname
-                logger.info(f"Loaded finance from table: {fname} ({len(finance)} rows)")
-                break
-        except Exception:
-            continue
+    merged["date"] = pd.to_datetime(merged["date"]).dt.strftime("%Y-%m-%d")
+    merged = merged.drop(columns=["trade_date"], errors="ignore")
 
-    # Prepare quarter column on prices
-    prices_dt = pd.to_datetime(prices['date'])
-    prices['quarter'] = prices_dt.dt.year.astype(str) + '-Q' + prices_dt.dt.quarter.astype(str)
-
-    merged = prices.copy()
-
-    if finance is not None:
-        # Convert finance date -> quarter (support both 'YYYY-Qx' and real dates)
-        def _to_quarter(v):
-            try:
-                if isinstance(v, str) and '-Q' in v:
-                    return v
-                # vnstock / bản cũ: "2024Q3"
-                m = re.match(r"^(\d{4})\s*Q\s*([1-4])$", str(v).strip(), re.I)
-                if m:
-                    return f"{m.group(1)}-Q{m.group(2)}"
-                dt = pd.to_datetime(v)
-                q = ((dt.month - 1) // 3) + 1
-                return f"{dt.year}-Q{q}"
-            except Exception:
-                return None
-
-        finance = finance.copy()
-        if 'date' in finance.columns:
-            finance['quarter'] = finance['date'].apply(_to_quarter)
-        elif 'quarter' not in finance.columns:
-            finance['quarter'] = None
-
-        # Select numeric feature columns from finance
-        finance_exclude = {'id', 'symbol', 'date', 'quarter', 'created_at'}
-        finance_cols = [c for c in finance.columns if c not in finance_exclude]
-
-        # Keep only quarter + features
-        finance_q = finance[['quarter'] + finance_cols].drop_duplicates(subset=['quarter'], keep='last')
-
-        # Merge into prices by quarter
-        merged = merged.merge(finance_q, on='quarter', how='left')
-
-        # Ensure numeric types and forward-fill finance features
-        for c in finance_cols:
-            try:
-                merged[c] = pd.to_numeric(merged[c], errors='coerce')
-            except Exception:
-                pass
-        merged = merged.sort_values('date').reset_index(drop=True)
-        if finance_cols:
-            merged[finance_cols] = merged[finance_cols].ffill()
-    else:
-        logger.warning("Không tìm thấy bảng finance — bỏ qua merge finance")
-
-    # 3. Read and aggregate news
-    news = None
-    try:
-        news = read_table('clean_news')
-    except Exception:
-        logger.warning('Không tìm thấy clean_news — bỏ qua merge news')
-
-    if news is not None and not news.empty:
-        news = news.copy()
-        # Normalize date format
-        news['date'] = pd.to_datetime(news['date']).dt.strftime('%Y-%m-%d')
-
-        daily_records = []
-        for dt, g in news.groupby('date', sort=False):
-            rec = {'date': dt, 'news_count': int(len(g))}
-            # sentiment
-            if 'sentiment_score' in g.columns:
-                rec['daily_sentiment'] = float(g['sentiment_score'].astype(float).mean())
-            else:
-                rec['daily_sentiment'] = None
-            # embedding_score
-            if 'embedding_score' in g.columns:
-                rec['embedding_score_mean'] = float(g['embedding_score'].astype(float).mean())
-                rec['embedding_score_std'] = float(g['embedding_score'].astype(float).std()) if len(g) > 1 else 0.0
-            daily_records.append(rec)
-
-        daily_news = pd.DataFrame(daily_records)
-
-        # Merge into merged by date
-        merged = merged.merge(daily_news, on='date', how='left')
-
-        # Fill news missing with neutral defaults
-        if 'daily_sentiment' in merged.columns:
-            merged['daily_sentiment'] = merged['daily_sentiment'].fillna(0.0)
-        if 'news_count' in merged.columns:
-            merged['news_count'] = merged['news_count'].fillna(0).astype(int)
-        if 'embedding_score_mean' in merged.columns:
-            merged['embedding_score_mean'] = merged['embedding_score_mean'].fillna(0.0)
-        if 'embedding_score_std' in merged.columns:
-            merged['embedding_score_std'] = merged['embedding_score_std'].fillna(0.0)
-    else:
-        logger.info('No news data to merge; adding default news columns')
-        merged['daily_sentiment'] = 0.0
-        merged['news_count'] = 0
-
-    # 4. Create target = next-day close
-    merged['target'] = merged['close'].shift(-1)
-
-    # 5. Drop rows with NaN target and any remaining NaNs
-    before = len(merged)
-    merged = merged.dropna(subset=['target']).reset_index(drop=True)
-    # Optionally drop rows with any NaN in feature columns
-    merged = merged.dropna().reset_index(drop=True)
-    after = len(merged)
-    logger.info(f"Merged features: rows {before} -> {after} after dropping NA and target")
-
-    # 6. Save merged_features
-    write_table(merged, 'merged_features')
+    write_table(merged, TABLE_MERGED_FEATURES, if_exists="replace")
     logger.info(f"Saved merged_features ({len(merged)} rows, {merged.shape[1]} cols)")
     return merged
 

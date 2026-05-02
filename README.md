@@ -85,8 +85,9 @@ streamlit run web/app.py
 | `raw_finance` | BCTC gốc | B |
 | `raw_news` | Tin tức gốc | C |
 | `clean_prices` | Giá + technical indicators | A |
-| `clean_finance` | BCTC + financial ratios | B |
+| `features_finance` | BCTC + ratios + effective_date | B |
 | `clean_news` | Tin tức + sentiment | C |
+| `daily_news_embeddings` | Embedding aggregate theo ngày | C |
 | `merged_features` | Tổng hợp → input model | D |
 | `predictions` | Kết quả dự đoán | D, E |
 | `model_metrics` | So sánh models | D, E |

@@ -1,128 +1,113 @@
-"""Train LSTM on `merged_features` and save metrics + model.
-
-Usage:
-    python scripts/train_lstm.py --epochs 50 --batch-size 64
-"""
+"""Train LSTM on `merged_features` and save metrics + model."""
 import argparse
-import sqlite3
-from pathlib import Path
-import pandas as pd
 import json
 import logging
+import sqlite3
+from pathlib import Path
 
-from config import settings
+import pandas as pd
+
+try:
+    from config import settings
+except Exception:
+    import sys
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from config import settings
+
 from models.lstm_model import LSTMPredictor
-import models.base_model as base_module
 
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--db", default=str(settings.DB_PATH))
+    parser.add_argument("--table", default=settings.TABLE_MERGED_FEATURES)
+    parser.add_argument("--epochs", type=int, default=settings.EPOCHS)
+    parser.add_argument("--batch-size", type=int, default=settings.BATCH_SIZE)
+    parser.add_argument("--lr", type=float, default=settings.LEARNING_RATE)
+    parser.add_argument("--name", default=settings.DEFAULT_MODEL_NAME)
+    parser.add_argument("--save-dir", default=str(settings.MODEL_DIR))
+    return parser
 
 
 def load_merged_features(db_path: Path, table_name: str) -> pd.DataFrame:
     conn = sqlite3.connect(db_path)
     try:
-        df = pd.read_sql(f"SELECT * FROM {table_name}", conn, parse_dates=['date'])
+        df = pd.read_sql(f"SELECT * FROM {table_name}", conn, parse_dates=["date"])
     finally:
         conn.close()
     return df
 
 
 def prepare_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Sắp xếp theo thời gian và tạo target nếu chưa có."""
-    if 'date' in df.columns:
-        df = df.sort_values('date').reset_index(drop=True)
+    if "date" in df.columns:
+        df = df.sort_values("date").reset_index(drop=True)
 
-    if 'target' not in df.columns:
-        if 'close' not in df.columns:
-            raise ValueError('`close` column required to build target')
-        df['target'] = df['close'].shift(-1)
+    if "target" not in df.columns:
+        if "close" not in df.columns:
+            raise ValueError("`close` column required to build target")
+        df["target"] = df["close"].shift(-1)
 
     return df
 
 
 def pick_features(df: pd.DataFrame):
-    """Chọn các feature tồn tại trong dataframe."""
-    feature_cols = [c for c in settings.ALL_FEATURES if c in df.columns]
+    feature_cols = [column for column in settings.ALL_FEATURES if column in df.columns]
     if not feature_cols:
-        raise ValueError('No features from settings.ALL_FEATURES found in input df')
+        raise ValueError("No features from settings.ALL_FEATURES found in input df")
     return feature_cols
 
 
 def save_metrics(metrics: dict, out_dir: Path):
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"metrics_{metrics.get('model_name','model')}.json"
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(metrics, f, indent=2, ensure_ascii=False)
+    path = out_dir / f"metrics_{metrics.get('model_name', 'model')}.json"
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump(metrics, file, indent=2, ensure_ascii=False)
     logger.info(f"Metrics saved: {path}")
 
 
-def make_lstm_with_hparams(epochs: int, batch_size: int, lr: float) -> LSTMPredictor:
-    """
-    Tạo LSTMPredictor với hyperparameters tùy chỉnh.
-    Thay vì monkeypatch module-level constants, dùng subclass override.
-    """
-    class CustomLSTM(LSTMPredictor):
-        def fit(self, df, feature_cols, target_col='target'):
-            # Override các hằng số trong base_module tạm thời (chỉ cho lần gọi này)
-            # Bằng cách patch local và restore sau khi xông
-            old_epochs = base_module.EPOCHS
-            old_batch  = base_module.BATCH_SIZE
-            old_lr     = base_module.LEARNING_RATE
-            base_module.EPOCHS = epochs
-            base_module.BATCH_SIZE = batch_size
-            base_module.LEARNING_RATE = lr
-            try:
-                return super().fit(df, feature_cols, target_col)
-            finally:
-                base_module.EPOCHS = old_epochs
-                base_module.BATCH_SIZE = old_batch
-                base_module.LEARNING_RATE = old_lr
-
-    return CustomLSTM()
-
-
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--db', default=str(settings.DB_PATH))
-    parser.add_argument('--table', default=settings.TABLE_MERGED_FEATURES)
-    parser.add_argument('--epochs', type=int, default=settings.EPOCHS)
-    parser.add_argument('--batch-size', type=int, default=settings.BATCH_SIZE)
-    parser.add_argument('--lr', type=float, default=settings.LEARNING_RATE)
-    parser.add_argument('--name', default='lstm_tcb')
-    parser.add_argument('--save-dir', default=str(settings.MODEL_DIR))
-    args = parser.parse_args()
+    args = build_parser().parse_args()
 
-    logger.info('Loading merged features from DB...')
+    logger.info("Loading merged features from DB...")
     df = load_merged_features(Path(args.db), args.table)
     df = prepare_df(df)
     feature_cols = pick_features(df)
-    df = df.dropna(subset=feature_cols + ['target']).reset_index(drop=True)
+    df = df.dropna(subset=feature_cols + ["target"]).reset_index(drop=True)
     if df.empty:
         raise RuntimeError(
-            'Không còn dòng sau khi dropna theo feature + target '
-            '— kiểm tra merged_features và ALL_FEATURES.'
+            "Không còn dòng sau khi dropna theo feature + target "
+            "— kiểm tra merged_features và ALL_FEATURES."
         )
 
     logger.info(f"Training rows: {len(df)} | features: {len(feature_cols)}")
     logger.info(f"Hyperparams: epochs={args.epochs}, batch={args.batch_size}, lr={args.lr}")
 
-    # Tạo model với hyperparams tùy chỉnh (không monkeypatch)
-    model = make_lstm_with_hparams(args.epochs, args.batch_size, args.lr)
-    metrics = model.fit(df, feature_cols, target_col='target')
-    metrics['train_args'] = {
-        'epochs': args.epochs,
-        'batch_size': args.batch_size,
-        'lr': args.lr,
-        'feature_count': len(feature_cols)
+    model = LSTMPredictor(
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.lr,
+    )
+    metrics = model.fit(df, feature_cols, target_col="target")
+    metrics["train_args"] = {
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "lr": args.lr,
+        "feature_count": len(feature_cols),
     }
 
-    # Lưu model và metrics
     model.save(name=args.name)
     save_metrics(metrics, Path(args.save_dir))
 
-    logger.info('Training finished.')
+    logger.info("Training finished.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
