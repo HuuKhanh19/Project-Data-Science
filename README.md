@@ -2,6 +2,10 @@
 
 Hệ thống dự đoán giá cổ phiếu **TCB (Techcombank)** sử dụng Deep Learning, kết hợp 3 nguồn dữ liệu: giá lịch sử, báo cáo tài chính, và tin tức (sentiment analysis).
 
+## 📝 Ghi chú
+
+Cập nhật README trên nhánh Hung.
+
 ## 🏗️ Kiến trúc
 
 ```
