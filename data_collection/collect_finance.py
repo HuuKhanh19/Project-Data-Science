@@ -187,12 +187,15 @@ def crawl_ratio_api():
         current_quarter = (today.month - 1) // 3 + 1
         current_year = today.year
 
-        # Lùi 1 quý để tránh gán nhãn vào quý hiện tại chưa công bố đầy đủ BCTC
+        # Lùi 1 quý: quý hiện tại thường chưa công bố BCTC đầy đủ nên không dùng làm mốc mới nhất.
+        # VD: nếu đang ở Q2/2025 → mốc mới nhất là Q1/2025.
         current_quarter -= 1
-        if current_quarter == 0:
+        if current_quarter == 0:  # Qua năm mới khi lùi từ Q1
             current_quarter = 4
             current_year -= 1
-        
+
+        # Sinh nhãn quý theo thứ tự ngược (mới → cũ) rồi insert vào đầu list
+        # để cuối vòng lặp quarters[0] là quý cũ nhất, quarters[-1] là quý mới nhất
         quarters = []
         y, q = current_year, current_quarter
         for i in range(len(ratio_df)):
@@ -201,8 +204,9 @@ def crawl_ratio_api():
             if q == 0:
                 q = 4
                 y -= 1
-        
+
         ratio_df['date'] = quarters
+        # Lấy điểm bắt đầu của 24 quý target (bỏ 4 quý history đầu dùng cho YoY)
         target_start = quarters[-TARGET_QUARTERS] if len(quarters) >= TARGET_QUARTERS else quarters[0]
         print(f"    -> Full range: {quarters[0]} to {quarters[-1]}")
         print(f"    -> Target 24Q range: {target_start} to {quarters[-1]}")

@@ -49,11 +49,12 @@ def clean_raw_prices(df: pd.DataFrame) -> pd.DataFrame:
         logger.warning(f"  Loại bỏ {invalid_mask.sum()} dòng có giá trị bất thường")
         df = df[~invalid_mask]
 
-    # Xử lý missing values
+    # Xử lý missing values: dùng ffill để giữ tính liên tục giá theo thời gian,
+    # bfill chỉ áp dụng cho các dòng đầu tiên nếu chưa có giá trị trước đó.
+    # Nếu sau cả hai bước vẫn còn null (cột thiếu hoàn toàn) thì drop.
     null_count = df.isnull().sum().sum()
     if null_count > 0:
         logger.warning(f"  Có {null_count} giá trị null")
-        # Forward fill trước (dùng giá ngày trước), rồi backward fill
         df = df.ffill().bfill()
         remaining_nulls = df.isnull().sum().sum()
         if remaining_nulls > 0:
