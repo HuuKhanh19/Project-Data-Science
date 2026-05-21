@@ -143,10 +143,11 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df['price_change'] = close.pct_change()           # % thay đổi 1 ngày
     df['price_change_5d'] = close.pct_change(periods=5)  # % thay đổi 5 ngày
 
-    # Rolling volatility — độ biến động 10 ngày
+    # Rolling std 10 ngày đo mức biến động giá; giá trị cao = thị trường bất ổn.
     df['volatility_10d'] = close.rolling(window=10).std()
 
-    # Volume trend — so sánh volume hiện tại với trung bình
+    # Volume SMA 10 ngày dùng để so sánh volume hiện tại với trung bình;
+    # volume vượt SMA thường xác nhận tín hiệu mua/bán mạnh hơn.
     df['volume_sma_10'] = volume.rolling(window=10).mean()
 
     logger.info("  ✅ Derived: price_change(1d,5d), volatility(10d), volume_sma(10)")
