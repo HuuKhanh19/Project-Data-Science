@@ -202,7 +202,7 @@ def validate_output(df: pd.DataFrame) -> bool:
         logger.error(f"  ❌ Còn {null_count} giá trị NaN")
         return False
 
-    # Kiểm tra RSI trong khoảng hợp lệ
+    # RSI theo định nghĩa luôn nằm trong [0, 100]; nếu vượt ra ngoài là lỗi tính toán.
     if (df['rsi_14'] < 0).any() or (df['rsi_14'] > 100).any():
         logger.warning("  ⚠️ RSI ngoài khoảng [0, 100]")
 
