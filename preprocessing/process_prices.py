@@ -163,6 +163,9 @@ def drop_warmup_rows(df: pd.DataFrame) -> pd.DataFrame:
     """
     logger.info("--- Bước 3: Xoá warm-up rows ---")
 
+    # SMA_50 cần tối thiểu 50 phiên để tính → 49 dòng đầu luôn là NaN.
+    # Các indicator khác (ATR_14, RSI_14) cũng có warm-up ngắn hơn nhưng
+    # SMA_50 là indicator dài nhất nên quyết định số dòng bị loại.
     before = len(df)
     df = df.dropna().reset_index(drop=True)
     dropped = before - len(df)
