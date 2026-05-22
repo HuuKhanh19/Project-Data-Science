@@ -61,7 +61,8 @@ def collect_prices():
     # In ra để debug nếu cần
     logger.info(f"Columns gốc từ vnstock: {list(df.columns)}")
 
-    # Mapping tên cột (vnstock3 thường dùng tiếng Anh lowercase)
+    # vnstock có thể thay đổi tên cột giữa các phiên bản nên cần map đầy đủ
+    # cả dạng viết hoa lẫn viết thường để tránh lỗi khi nâng cấp thư viện.
     column_mapping = {
         'time': 'date',
         'Time': 'date',
@@ -123,7 +124,7 @@ def collect_prices():
         df = df.dropna()
         logger.info(f"  Sau khi drop null: {len(df)} rows")
 
-    # Kiểm tra giá trị bất thường
+    # Giá và volume âm là dấu hiệu lỗi dữ liệu từ API, không phải giá trị hợp lệ.
     if (df['close'] <= 0).any():
         logger.warning("⚠️  Có giá đóng cửa <= 0!")
     if (df['volume'] < 0).any():
