@@ -181,7 +181,8 @@ def process_and_engineer_finance():
         df[col] = df[col].bfill()
     print(f"  -> Forward/backward filled NaN")
     
-    # 3. Remove outliers (Z-score > 3)
+    # Z-score > 3 tương đương ngoài 3 độ lệch chuẩn (~0.3% xác suất xảy ra tự nhiên).
+    # Dùng mask để chỉ tính Z-score trên các giá trị notna, tránh lỗi khi cột còn NaN.
     rows_before = len(df)
     for col in numeric_cols:
         mask = df[col].notna()
