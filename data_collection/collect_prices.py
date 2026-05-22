@@ -97,13 +97,13 @@ def collect_prices():
     # Chuyển date thành string format chuẩn
     df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
 
-    # Xoá duplicate (nếu có)
+    # Giữ dòng cuối nếu trùng ngày vì API đôi khi trả về bản cập nhật muộn hơn.
     before = len(df)
     df = df.drop_duplicates(subset='date', keep='last')
     if len(df) < before:
         logger.warning(f"⚠️  Xoá {before - len(df)} dòng duplicate")
 
-    # Sort theo ngày
+    # Sort theo ngày để đảm bảo thứ tự thời gian đúng trước khi lưu database.
     df = df.sort_values('date').reset_index(drop=True)
 
     # ---- 5. Kiểm tra data quality ----
