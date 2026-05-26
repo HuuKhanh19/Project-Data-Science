@@ -225,6 +225,7 @@ def process_and_engineer_finance():
     print(f"\n[STAGE 3] Normalizing features...")
     
     # Split data for scaling (train: first 16Q, then apply to val/test)
+    # 24Q tổng: 16Q train (2/3) + 4Q val + 4Q test — scaler chỉ fit trên train để tránh data leakage
     train_idx = 16  # 4Q before split
     if len(df) >= train_idx:
         train_df = df.iloc[:train_idx].copy()
