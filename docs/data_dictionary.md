@@ -21,15 +21,20 @@
 | atr_14 | Average True Range |
 | obv | On-Balance Volume |
 
-## Financial Ratios (clean_finance)
+## Financial Features (features_finance)
 | Column | Mô tả |
 |--------|-------|
+| date | Mã kỳ báo cáo (YYYY-Qn) |
+| period_end_date | Ngày kết thúc kỳ báo cáo |
+| effective_date | Ngày ratio được phép xuất hiện trong pipeline |
 | roe | Return on Equity |
 | roa | Return on Assets |
 | nim | Net Interest Margin (đặc trưng ngân hàng) |
 | pe_ratio | Price to Earnings |
 | pb_ratio | Price to Book |
 | debt_to_equity | Tỷ lệ nợ trên vốn |
+| roe_yoy, roa_yoy | Tăng trưởng YoY theo quý |
+| roe_lag4, roa_lag4 | Giá trị cùng kỳ năm trước |
 
 ## Sentiment (clean_news)
 | Column | Mô tả |
@@ -38,3 +43,10 @@
 | sentiment_pos | Xác suất positive |
 | sentiment_neg | Xác suất negative |
 | sentiment_neu | Xác suất neutral |
+
+## Daily News Embeddings (daily_news_embeddings)
+| Column | Mô tả |
+|--------|-------|
+| date | Ngày tổng hợp |
+| embedding_score_mean | Mean của embedding score trong ngày |
+| embedding_score_std | Độ phân tán embedding score trong ngày |

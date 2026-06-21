@@ -11,7 +11,7 @@ Output: clean_prices table (giá đã clean + 18 technical indicators)
 import pandas as pd
 import numpy as np
 import ta
-from loguru import logger
+from utils.logger import logger
 from database.connection import read_table, write_table
 
 logger.add("logs/process_prices.log", rotation="1 week")
@@ -49,16 +49,19 @@ def clean_raw_prices(df: pd.DataFrame) -> pd.DataFrame:
         logger.warning(f"  Loại bỏ {invalid_mask.sum()} dòng có giá trị bất thường")
         df = df[~invalid_mask]
 
-    # Xử lý missing values
-    null_count = df.isnull().sum().sum()
-    if null_count > 0:
-        logger.warning(f"  Có {null_count} giá trị null")
-        # Forward fill trước (dùng giá ngày trước), rồi backward fill
-        df = df.ffill().bfill()
-        remaining_nulls = df.isnull().sum().sum()
-        if remaining_nulls > 0:
-            logger.warning(f"  Còn {remaining_nulls} null sau fill → drop")
-            df = df.dropna()
+    required_ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
+    missing_ohlcv_mask = df[required_ohlcv_cols].isnull().any(axis=1)
+    if missing_ohlcv_mask.any():
+        logger.warning(
+            f"  Loại bỏ {missing_ohlcv_mask.sum()} dòng thiếu OHLCV trọng yếu "
+            "(không forward/backward fill dữ liệu thị trường)"
+        )
+        df = df[~missing_ohlcv_mask]
+
+    remaining_nulls = df.isnull().sum().sum()
+    if remaining_nulls > 0:
+        logger.warning(f"  Còn {remaining_nulls} null ngoài OHLCV → drop")
+        df = df.dropna()
 
     df = df.reset_index(drop=True)
     logger.info(f"  ✅ Data sạch: {len(df)} phiên giao dịch")

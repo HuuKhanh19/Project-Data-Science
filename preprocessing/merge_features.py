@@ -1,61 +1,125 @@
 """
-Merge 3 bảng clean thành merged_features cho model.
-═════════════════════════════════════════════════════
-Phụ trách: Thành viên D
-Branch: feature/merge-features
-Chạy: python -m preprocessing.merge_features
-
-Input:  clean_prices, clean_finance, clean_news
-Output: merged_features table (sẵn sàng cho model)
+Merge cleaned price / finance / news features into merged_features for models.
 """
 import pandas as pd
-from loguru import logger
+from utils.logger import logger
+
+from config.settings import (
+    ALL_FEATURES,
+    TABLE_CLEAN_NEWS,
+    TABLE_CLEAN_PRICES,
+    TABLE_FEATURES_FINANCE,
+    TABLE_MERGED_FEATURES,
+)
 from database.connection import read_table, write_table
+
 
 logger.add("logs/merge_features.log", rotation="1 week")
 
 
-def merge_features():
-    """
-    Merge 3 bảng clean thành 1 bảng merged_features.
+def _load_clean_prices() -> pd.DataFrame:
+    prices = read_table(TABLE_CLEAN_PRICES)
+    if prices.empty:
+        raise ValueError("clean_prices rỗng — không thể merge")
 
-    Logic merge:
-    - clean_prices: trục chính (mỗi ngày giao dịch = 1 row)
-    - clean_finance: map theo quarter (mỗi ngày trong Q3 dùng số liệu Q3)
-    - clean_news: aggregate theo ngày (mean sentiment, count)
-    - target: giá close ngày hôm sau (shift -1)
-    """
+    prices = prices.copy()
+    prices["date"] = pd.to_datetime(prices["date"]).dt.strftime("%Y-%m-%d")
+    prices["trade_date"] = pd.to_datetime(prices["date"])
+    return prices.sort_values("trade_date").reset_index(drop=True)
+
+
+def _merge_finance_features(prices: pd.DataFrame) -> pd.DataFrame:
+    try:
+        finance = read_table(TABLE_FEATURES_FINANCE)
+    except Exception:
+        logger.warning("Không tìm thấy features_finance — tiếp tục không có finance features")
+        return prices.copy()
+
+    if finance.empty:
+        logger.warning("features_finance rỗng — tiếp tục không có finance features")
+        return prices.copy()
+
+    finance = finance.copy()
+    finance["effective_date"] = pd.to_datetime(finance["effective_date"])
+    finance["period_end_date"] = pd.to_datetime(finance["period_end_date"]).dt.strftime("%Y-%m-%d")
+    finance = finance.rename(columns={"date": "finance_quarter"})
+    finance = finance.sort_values(["effective_date", "finance_quarter"]).reset_index(drop=True)
+
+    finance_columns = [
+        column
+        for column in finance.columns
+        if column not in {"id", "symbol", "created_at"}
+    ]
+    finance = finance[finance_columns].copy()
+    finance["effective_date_dt"] = finance["effective_date"]
+
+    merged = pd.merge_asof(
+        prices.sort_values("trade_date"),
+        finance.sort_values("effective_date_dt"),
+        left_on="trade_date",
+        right_on="effective_date_dt",
+        direction="backward",
+    )
+
+    merged["effective_date"] = pd.to_datetime(merged["effective_date"]).dt.strftime("%Y-%m-%d")
+    merged = merged.drop(columns=["effective_date_dt"], errors="ignore")
+    return merged
+
+
+def _merge_news_features(merged: pd.DataFrame) -> pd.DataFrame:
+    try:
+        news = read_table(TABLE_CLEAN_NEWS)
+    except Exception:
+        logger.warning("Không tìm thấy clean_news — dùng giá trị news mặc định")
+        news = pd.DataFrame()
+
+    if news.empty:
+        merged["daily_sentiment"] = 0.0
+        merged["news_count"] = 0
+        merged["embedding_score_mean"] = 0.0
+        merged["embedding_score_std"] = 0.0
+        return merged
+
+    news = news.copy()
+    news["date"] = pd.to_datetime(news["date"]).dt.strftime("%Y-%m-%d")
+
+    daily_news = (
+        news.groupby("date", sort=False)
+        .agg(
+            daily_sentiment=("sentiment_score", "mean"),
+            news_count=("date", "size"),
+            embedding_score_mean=("embedding_score", "mean"),
+            embedding_score_std=("embedding_score", "std"),
+        )
+        .reset_index()
+    )
+
+    merged = merged.merge(daily_news, on="date", how="left")
+    merged["daily_sentiment"] = merged["daily_sentiment"].fillna(0.0)
+    merged["news_count"] = merged["news_count"].fillna(0).astype(int)
+    merged["embedding_score_mean"] = merged["embedding_score_mean"].fillna(0.0)
+    merged["embedding_score_std"] = merged["embedding_score_std"].fillna(0.0)
+    return merged
+
+
+def merge_features():
     logger.info("Merge features từ 3 nguồn...")
 
-    # TODO: Thành viên D implement
-    # Gợi ý:
-    #
-    # 1. Đọc 3 bảng clean:
-    #    prices = read_table("clean_prices")
-    #    finance = read_table("clean_finance")
-    #    news = read_table("clean_news")
-    #
-    # 2. Merge finance vào prices theo quarter:
-    #    - Từ date → xác định quarter ("2024-Q3")
-    #    - LEFT JOIN clean_finance ON quarter
-    #    - Forward fill nếu quarter chưa có data (dùng quý trước)
-    #
-    # 3. Aggregate news theo ngày:
-    #    daily_news = news.groupby('date').agg(
-    #        daily_sentiment=('sentiment_score', 'mean'),
-    #        news_count=('sentiment_score', 'count')
-    #    )
-    #    - LEFT JOIN vào prices ON date
-    #    - Fill 0 cho ngày không có tin
-    #
-    # 4. Tạo target column:
-    #    df['target'] = df['close'].shift(-1)
-    #    df = df.dropna(subset=['target'])
-    #
-    # 5. Drop rows có NaN (từ rolling windows của indicators)
-    # 6. Lưu: write_table(df, "merged_features")
+    prices = _load_clean_prices()
+    merged = _merge_finance_features(prices)
+    merged = _merge_news_features(merged)
 
-    raise NotImplementedError("Thành viên D cần implement hàm này")
+    merged["target"] = merged["close"].shift(-1)
+
+    required_feature_columns = [column for column in ALL_FEATURES if column in merged.columns]
+    merged = merged.dropna(subset=required_feature_columns + ["target"]).reset_index(drop=True)
+
+    merged["date"] = pd.to_datetime(merged["date"]).dt.strftime("%Y-%m-%d")
+    merged = merged.drop(columns=["trade_date"], errors="ignore")
+
+    write_table(merged, TABLE_MERGED_FEATURES, if_exists="replace")
+    logger.info(f"Saved merged_features ({len(merged)} rows, {merged.shape[1]} cols)")
+    return merged
 
 
 if __name__ == "__main__":

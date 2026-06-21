@@ -7,7 +7,13 @@ Ví dụ:
     from config.settings import DB_PATH, SYMBOL, DEVICE
 """
 from pathlib import Path
-import torch
+from datetime import date
+
+# Optional: torch for model training (not needed for data pipeline)
+try:
+    import torch
+except ImportError:
+    torch = None
 
 # ============================
 # Paths
@@ -22,8 +28,9 @@ LOG_DIR = PROJECT_DIR / "logs"
 # ============================
 SYMBOL = "TCB"
 DATA_SOURCE = "VCI"
-DATA_START_DATE = "2022-01-01"   # 3 năm gần nhất
-DATA_END_DATE = "2025-03-12"     # Ngày cố định cho Phase 1
+DATA_START_DATE = "2020-01-01"
+# Luôn lấy đến hôm nay để pipeline giá khớp dữ liệu mới nhất (có thể ghi đè bằng biến môi trường nếu cần)
+DATA_END_DATE = date.today().strftime("%Y-%m-%d")
 
 # ============================
 # Database Table Names
@@ -35,8 +42,11 @@ TABLE_RAW_NEWS = "raw_news"
 
 # Clean tables (đã tiền xử lý)
 TABLE_CLEAN_PRICES = "clean_prices"
-TABLE_CLEAN_FINANCE = "clean_finance"
+TABLE_FEATURES_FINANCE = "features_finance"
+# Deprecated alias kept for backward compatibility in modules/docs not yet updated.
+TABLE_CLEAN_FINANCE = TABLE_FEATURES_FINANCE
 TABLE_CLEAN_NEWS = "clean_news"
+TABLE_DAILY_NEWS_EMBEDDINGS = "daily_news_embeddings"
 
 # Output tables
 TABLE_MERGED_FEATURES = "merged_features"
@@ -54,6 +64,7 @@ DROPOUT = 0.2
 LEARNING_RATE = 0.001
 EPOCHS = 100
 BATCH_SIZE = 32
+DEFAULT_MODEL_NAME = "lstm"
 
 # Train/Val/Test split ratios (theo thời gian, KHÔNG random)
 TRAIN_RATIO = 0.70
@@ -76,15 +87,31 @@ TECHNICAL_FEATURES = [
     'volatility_10d', 'volume_sma_10'
 ]
 
+# Khớp với `process_finance` (features_finance) sau bước feature engineering
 FINANCE_FEATURES = [
-    'roe', 'roa', 'nim',
-    'pe_ratio', 'pb_ratio',
-    'debt_to_equity', 'revenue_growth', 'profit_growth'
+    'roe', 'roa', 'debt_to_equity',
+    'net_profit_margin', 'financial_leverage',
+    'roe_yoy', 'roa_yoy', 'roe_lag4', 'roa_lag4',
+    # NOTE: pe_ratio, pb_ratio chỉ có trong raw_finance,
+    # không có trong features_finance → đã xóa để tránh confusion
 ]
 
-SENTIMENT_FEATURES = ['daily_sentiment', 'news_count']
+SENTIMENT_FEATURES = [
+    'daily_sentiment',
+    'news_count',
+    'embedding_score_mean',
+    'embedding_score_std',
+]
 
 ALL_FEATURES = PRICE_FEATURES + TECHNICAL_FEATURES + FINANCE_FEATURES + SENTIMENT_FEATURES
+
+# Quarter-specific reporting lag rules for when financial data becomes available.
+FINANCE_REPORT_LAG_DAYS = {
+    'Q1': 30,
+    'Q2': 45,
+    'Q3': 30,
+    'Q4': 90,
+}
 
 # ============================
 # NLP / Sentiment
@@ -94,4 +121,7 @@ SENTIMENT_MODEL = "wonrax/phobert-base-vietnamese-sentiment"
 # ============================
 # Device (GPU/CPU)
 # ============================
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+if torch is not None:
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+else:
+    DEVICE = 'cpu'
